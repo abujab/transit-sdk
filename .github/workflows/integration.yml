@@ -1,0 +1,24 @@
+name: Trusted TRIAS integration
+on:
+  workflow_dispatch:
+permissions:
+  contents: read
+jobs:
+  integration:
+    # Never execute PR code with the secret, including same-repository PRs.
+    if: github.ref == 'refs/heads/main' && github.repository == 'abujab/transit-sdk'
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: main
+          persist-credentials: false
+      - uses: pnpm/action-setup@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+      - run: pnpm install --frozen-lockfile --ignore-scripts
+      - run: pnpm test:integration
+        env:
+          TRIAS_REQUESTOR_KEY: ${{ secrets.TRIAS_REQUESTOR_KEY }}

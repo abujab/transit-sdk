@@ -1,0 +1,12 @@
+<?xml version='1.0' encoding='UTF-8'?>
+<Trias xmlns="http://www.vdv.de/trias" xmlns:siri="http://www.siri.org.uk/siri" version="1.2">
+  <ServiceDelivery>
+    <siri:ResponseTimestamp>2026-10-24T10:00:00Z</siri:ResponseTimestamp>
+    <siri:ProducerRef>fixture-provider</siri:ProducerRef>
+    <siri:Status>true</siri:Status>
+    <Language>de</Language>
+    <DeliveryPayload>
+      <TripResponse/>
+    </DeliveryPayload>
+  </ServiceDelivery>
+</Trias>

@@ -4,7 +4,11 @@ export interface TriasOptions { requestorKey: string; endpoint?: string; timeout
 // Untyped optional and repeating XML elements are confined to this adapter.
 type Xml = any;
 const array = (v: Xml): Xml[] => v == null ? [] : Array.isArray(v) ? v : [v];
-const text = (v: Xml): string => String(v?.Text ?? v ?? '');
+// TRIAS international texts and bays may repeat for different languages.
+const text = (v: Xml): string => {
+  const first = Array.isArray(v) ? v[0] : v;
+  return String(first?.Text ?? first ?? '');
+};
 const escape = (v: string): string => v.replace(/[<>&"']/g, c => ({ '<': '&lt;', '>': '&gt;', '&': '&amp;', '"': '&quot;', "'": '&apos;' })[c]!);
 const parser = new XMLParser({ removeNSPrefix: true, parseTagValue: false });
 function fail(): never { throw new TransitError('PARSE', 'Invalid TRIAS response'); }
@@ -21,7 +25,7 @@ function call(v: Xml, kind: 'Departure' | 'Arrival'): Call {
   return { stop: stop(v), scheduledTime: t?.TimetabledTime, estimatedTime: t?.EstimatedTime, platform: v.PlannedBay ? text(v.PlannedBay) : undefined, estimatedPlatform: v.EstimatedBay ? text(v.EstimatedBay) : undefined };
 }
 function integer(v: number | undefined, max: number): void {
-  if (v !== undefined && (!Number.isInteger(v) || v < 0 || v > max)) throw new TransitError('INVALID_ARGUMENT', `Expected an integer between 0 and ${max}`);
+  if (v !== undefined && (!Number.isInteger(v) || v < 1 || v > max)) throw new TransitError('INVALID_ARGUMENT', `Expected an integer between 1 and ${max}`);
 }
 export class TriasProvider implements TransitProvider {
   private readonly transport: typeof globalThis.fetch;
@@ -44,13 +48,19 @@ export class TriasProvider implements TransitProvider {
       const response = await this.transport(this.endpoint, { method: 'POST', redirect: 'error', signal,
         headers: { 'Content-Type': 'application/xml; charset=utf-8', Accept: 'application/xml' },
         body: `<?xml version="1.0" encoding="UTF-8"?><Trias version="1.2" xmlns="http://www.vdv.de/trias" xmlns:siri="http://www.siri.org.uk/siri"><ServiceRequest><siri:RequestTimestamp>${new Date().toISOString()}</siri:RequestTimestamp><siri:RequestorRef>${escape(this.key)}</siri:RequestorRef><RequestPayload>${payload}</RequestPayload></ServiceRequest></Trias>` });
-      if (!response.ok) throw new TransitError('HTTP', 'TRIAS HTTP request failed', response.status);
+      if (!response.ok) {
+        // Classify before reading/parsing: gateways may return HTML or an empty body.
+        const message = response.status === 401 || response.status === 403
+          ? 'TRIAS access refused; verify endpoint, requestor authorization and gateway policy'
+          : 'TRIAS HTTP request failed';
+        throw new TransitError('HTTP', message, response.status);
+      }
       const xml = await response.text();
       if (/<!DOCTYPE|<!ENTITY/i.test(xml) || XMLValidator.validate(xml) !== true) return fail();
       let root: Xml;
       try { root = parser.parse(xml)?.Trias?.ServiceDelivery; } catch { return fail(); }
       if (!root) return fail();
-      if (root.Status === 'false' || root.ErrorMessage || root.ErrorCondition) throw new TransitError('PROVIDER', 'TRIAS rejected the request');
+      if (['false', '0'].includes(root.Status) || root.ErrorMessage || root.ErrorCondition) throw new TransitError('PROVIDER', 'TRIAS rejected the request');
       return root.DeliveryPayload ?? fail();
     } catch (error) {
       if (options.signal?.aborted) throw new TransitError('ABORTED', 'Request cancelled');
@@ -64,10 +74,10 @@ export class TriasProvider implements TransitProvider {
     if (!query.trim()) throw new TransitError('INVALID_ARGUMENT', 'Search query is required');
     integer(options.limit, 100);
     const result = await this.request(`<LocationInformationRequest><InitialInput><LocationName>${escape(query)}</LocationName></InitialInput><Restrictions><Type>stop</Type><NumberOfResults>${options.limit ?? 10}</NumberOfResults></Restrictions></LocationInformationRequest>`, options);
-    const delivery = result.LocationInformationDelivery;
+    const delivery = result.LocationInformationResponse;
     if (delivery == null) return fail();
     if (delivery.ErrorMessage) throw new TransitError('PROVIDER', 'TRIAS stop search failed');
-    return array(delivery.Location).filter(i => i.Location?.StopPoint || i.Location?.StopPlace).map(i => {
+    return array(delivery.LocationResult).filter(i => !['false', '0'].includes(i.Complete) && (i.Location?.StopPoint || i.Location?.StopPlace)).map(i => {
       const l = i.Location; const p = l.GeoPosition;
       return { ...stop(l.StopPoint ?? l.StopPlace), ...(p ? { latitude: Number(p.Latitude), longitude: Number(p.Longitude) } : {}) };
     });
@@ -76,9 +86,9 @@ export class TriasProvider implements TransitProvider {
     if (!query.origin?.trim() || !query.destination?.trim() || !(query.time instanceof Date) || !Number.isFinite(query.time.getTime()) || !['departure', 'arrival'].includes(query.timeType)) throw new TransitError('INVALID_ARGUMENT', 'Valid stops, time and timeType are required');
     integer(query.limit, 100); integer(query.maxTransfers, 20);
     const time = `<DepArrTime>${query.time.toISOString()}</DepArrTime>`;
-    const endpoint = (id: string, t: string) => `<LocationRef><StopPointRef>${escape(id)}</StopPointRef></LocationRef>${t}`;
-    const result = await this.request(`<TripRequest><Origin>${endpoint(query.origin, query.timeType === 'departure' ? time : '')}</Origin><Destination>${endpoint(query.destination, query.timeType === 'arrival' ? time : '')}</Destination><Params><NumberOfResults>${query.limit ?? 5}</NumberOfResults>${query.maxTransfers !== undefined ? `<NumberOfInterchanges>${query.maxTransfers}</NumberOfInterchanges>` : ''}<IncludeIntermediateStops>true</IncludeIntermediateStops></Params></TripRequest>`, options);
-    const delivery = result.TripDelivery;
+    const endpoint = (id: string, t: string) => `<LocationRef><StopPointRef>${escape(id)}</StopPointRef><LocationName><Text>${escape(id)}</Text></LocationName></LocationRef>${t}`;
+    const result = await this.request(`<TripRequest><Origin>${endpoint(query.origin, query.timeType === 'departure' ? time : '')}</Origin><Destination>${endpoint(query.destination, query.timeType === 'arrival' ? time : '')}</Destination><Params><NumberOfResults>${query.limit ?? 5}</NumberOfResults><IgnoreRealtimeData>false</IgnoreRealtimeData>${query.maxTransfers !== undefined ? `<InterchangeLimit>${query.maxTransfers}</InterchangeLimit>` : ''}<IncludeIntermediateStops>true</IncludeIntermediateStops></Params></TripRequest>`, options);
+    const delivery = result.TripResponse;
     if (delivery == null) return fail();
     if (delivery.ErrorMessage) throw new TransitError('PROVIDER', 'TRIAS journey planning failed');
     return array(delivery.TripResult).map(result => {
@@ -87,7 +97,9 @@ export class TriasProvider implements TransitProvider {
       const legs: Leg[] = array(trip.TripLeg).map(leg => {
         if (leg.TimedLeg) {
           const t = leg.TimedLeg; const s = t.Service; if (!s) return fail();
-          return { type: 'transit', departure: call(t.LegBoard, 'Departure'), arrival: call(t.LegAlight, 'Arrival'), line: text(s.PublishedLineName ?? s.LineRef), mode: s.Mode?.PtMode, destination: s.DestinationText ? text(s.DestinationText) : undefined, cancelled: s.Cancelled === 'true' };
+          // MENTZ documents flat service fields; the VDV XSD nests them in ServiceSection.
+          const service = array(s.ServiceSection)[0] ?? s;
+          return { type: 'transit', departure: call(t.LegBoard, 'Departure'), arrival: call(t.LegAlight, 'Arrival'), line: text(service.PublishedLineName ?? service.LineRef), mode: service.Mode?.PtMode, destination: s.DestinationText ? text(s.DestinationText) : undefined, cancelled: ['true', '1'].includes(s.Cancelled) };
         }
         const w = leg.InterchangeLeg ?? leg.ContinuousLeg;
         if (!w || (leg.ContinuousLeg && w.Service?.IndividualMode !== 'walk')) return fail();

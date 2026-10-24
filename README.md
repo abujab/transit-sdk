@@ -34,9 +34,9 @@ if (stops[0] && destinations[0]) {
 
 ## Architecture and results
 
-`TransitProvider` defines `searchStops` and `planJourney`. Applications depend on this interface; another provider can implement it without importing TRIAS code. Provider stop IDs are opaque strings and should be reused only with the provider that issued them. The TRIAS adapter owns XML serialization, transport, and normalization; the core model is independent of XML.
+`TransitProvider` defines `searchStops` and `planJourney`. Applications depend on this interface; another provider can implement it without importing TRIAS code. Provider stop IDs are opaque strings and should be reused only with the provider that issued them. The TRIAS adapter owns XML serialization, transport, and normalization; the core model is independent of XML. See the [TRIAS 1.2 conformance review](docs/trias-conformance.md) for official references, XSD validation and documented profile differences.
 
-Journeys contain ordered discriminated `transit` and `walk` legs, transfer counts, and total duration. Walks include access, egress, and interchanges. Durations are seconds, distances metres, coordinates WGS84 degrees, and timestamps ISO 8601 strings with timezones. Planned and estimated times/platforms stay separate; missing estimates mean realtime data was not supplied. Cancellation is mapped when reported by the service. Times and cancellations are snapshots and availability depends on upstream coverage.
+Journeys contain ordered discriminated `transit` and `walk` legs, transfer counts, and total duration. Walks include access, egress, and interchanges. Durations are seconds, distances metres, coordinates WGS84 degrees, and timestamps ISO 8601 strings with timezones. Planned and estimated times/platforms stay separate; missing estimates mean realtime data was not supplied. Cancellation is mapped when reported by the service; false means cancellation was not reported, rather than a guarantee of service. Limit values must be positive: 1–100 results and 1–20 maxTransfers; zero transfers cannot currently be requested under the downloaded XSD. Requests repeat the stop ID as the XSD-required LocationName text. Times and cancellations are snapshots and availability depends on upstream coverage.
 
 The first version supports stop-to-stop planning and walking connections. It does not support fares, booking, accessibility guarantees, non-walking individual transport, or realtime subscriptions. Unsupported leg types fail explicitly rather than silently disappearing. No retries or caching occur automatically.
 
@@ -49,10 +49,12 @@ pnpm typecheck
 pnpm test
 pnpm build
 pnpm pack
+# Optional local standards validation; required in CI (Python 3 + lxml).
+pnpm test:schema
 ```
 
-Unit tests use synthetic XML and a dummy credential, never a live key. They cover search results, XML escaping, arrival/departure requests, walking and transfers, realtime data, invalid responses, provider/HTTP/network errors, cancellation, and timeouts.
+Unit tests use realistic synthetic XML fixtures and a dummy credential, never a live key. CI also validates actual SDK-generated requests and response fixtures against the checksum-pinned official XSD. They cover search results, XML escaping, arrival/departure requests, walking and transfers, realtime data, invalid responses, provider/HTTP/network errors, cancellation, and timeouts.
 
-CI runs on PRs without secrets. The separate **Trusted TRIAS integration** workflow is manually dispatched **on main after merge**. Its job requires this repository and `refs/heads/main`, checks out main explicitly, and supplies the existing `TRIAS_REQUESTOR_KEY` secret only to the integration test step. It never runs on `pull_request_target`, PR branches, or fork code. Never print the secret, enable HTTP debug logging, or upload request/response artifacts. Do not change this workflow to test untrusted code with credentials.
+CI runs on PRs without secrets. The separate **Trusted TRIAS integration** workflow is manually dispatched **on main after merge**. Its job requires this repository and `refs/heads/main`, checks out main explicitly, and supplies the existing `TRIAS_REQUESTOR_KEY` secret only to the integration test step. It never runs on `pull_request_target`, PR branches, or fork code. An optional `TRIAS_ENDPOINT` repository variable selects the HTTPS endpoint issued by MobiData BW; RequestorRef authentication is unchanged. Never print the secret, enable HTTP debug logging, or upload request/response artifacts. Do not change this workflow to test untrusted code with credentials.
 
-The integration smoke test searches real stops and plans both time directions. It requires available provider service and future timetable coverage. Passing unit tests alone does not establish live API compatibility. The secret is not accessed during local development or PR validation.
+The integration smoke test searches real stops and plans both time directions. It reports safe phase/code/status diagnostics: HTTP 403 is an access refusal before XML parsing and does not prove a specific gateway or credential fault. See the [403 investigation and live-verification checklist](docs/trias-conformance.md#http-403-investigation). It requires available provider service and future timetable coverage. Passing unit tests alone does not establish live API compatibility. The secret is not accessed during local development or PR validation.

@@ -1,0 +1,37 @@
+<?xml version='1.0' encoding='UTF-8'?>
+<Trias xmlns="http://www.vdv.de/trias" xmlns:siri="http://www.siri.org.uk/siri" version="1.2">
+  <ServiceDelivery>
+    <siri:ResponseTimestamp>2026-10-24T10:00:00Z</siri:ResponseTimestamp>
+    <siri:ProducerRef>fixture-provider</siri:ProducerRef>
+    <siri:Status>true</siri:Status>
+    <Language>de</Language>
+    <DeliveryPayload>
+      <LocationInformationResponse>
+        <LocationResult>
+          <Location>
+            <StopPoint>
+              <StopPointRef>de:08222:2417</StopPointRef>
+              <StopPointName>
+                <Text>Mannheim, Hauptbahnhof</Text>
+                <Language>de</Language>
+              </StopPointName>
+              <StopPointName>
+                <Text>Central station</Text>
+                <Language>en</Language>
+              </StopPointName>
+            </StopPoint>
+            <LocationName>
+              <Text>Mannheim, Hauptbahnhof</Text>
+            </LocationName>
+            <GeoPosition>
+              <Longitude>8.469</Longitude>
+              <Latitude>49.479</Latitude>
+            </GeoPosition>
+          </Location>
+          <Complete>true</Complete>
+          <Probability>1</Probability>
+        </LocationResult>
+      </LocationInformationResponse>
+    </DeliveryPayload>
+  </ServiceDelivery>
+</Trias>
